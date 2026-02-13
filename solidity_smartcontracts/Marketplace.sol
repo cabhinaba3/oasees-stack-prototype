@@ -156,13 +156,13 @@ contract OaseesMarketplace is ReentrancyGuard {
   }
 
   struct DAO{
-    address nftContract;
-    uint256 tokenId;
+    uint256 marketPlaceId;
+    address governance;
+    address timelock;
+    address token;
+    address box;
     string desc_uri;
     DaoMembers members;
-    uint256 marketPlaceId;
-    uint256 clusterTokenId;
-    bool hasCluster;
   }
 
 
@@ -176,28 +176,24 @@ contract OaseesMarketplace is ReentrancyGuard {
   );
 
 
-  function makeDao(address _nftContract, uint256 _tokenId,string memory _desc_uri,uint256 _clusterTokenId, bool _hasCluster) public payable nonReentrant returns(uint256) {
+  function makeDao(address _governance, address _timelock, address _token, address _box, string memory _desc_uri) public payable nonReentrant {
   
     _daoCount.increment();
+    uint256 _marketplaceId = _daoCount.current();
 
     DaoMembers members = new DaoMembers();
 
     members.addMember(msg.sender);
-    // if(_hasCluster){
-    //   members.addMember(msg.sender);
-    //   emit ClusterJoined(msg.sender);
-    // }
-
     emit ClusterJoined(msg.sender);
     
-    _idToDao[_daoCount.current()] = DAO(
-        _nftContract,
-        _tokenId,
+    _idToDao[_marketplaceId] = DAO(
+        _marketplaceId,
+        _governance,
+        _timelock,
+        _token,
+        _box,
         _desc_uri,
-        members,
-        _daoCount.current(),
-        _clusterTokenId,
-        _hasCluster
+        members
         );
 
     emit NewDAO();
@@ -231,32 +227,32 @@ contract OaseesMarketplace is ReentrancyGuard {
   }
 
 
-  function joinDao(uint256 _tokenId) public payable nonReentrant {
+  function joinDao(uint256 _marketplaceId) public payable nonReentrant {
 
-    _idToDao[_tokenId].members.addMember(msg.sender);
+    _idToDao[_marketplaceId].members.addMember(msg.sender);
     
-    emit DaoJoined(msg.sender, _idToDao[_tokenId].tokenId);
+    emit DaoJoined(msg.sender, _idToDao[_marketplaceId].marketPlaceId);
   }
 
-  function applyDao(uint256 _marketplaceId, uint256 _tokenId) public payable nonReentrant {
-    _idToDao[_marketplaceId].tokenId = _tokenId;
-    DAO storage dao = _idToDao[_marketplaceId];
-    for (uint i=0 ; i<dao.members.getMembers().length ; i++){
-      emit DaoJoined(dao.members.getMembers()[i],dao.tokenId);
-    }
+  // function applyDao(uint256 _marketplaceId, uint256 _tokenId) public payable nonReentrant {
+  //   _idToDao[_marketplaceId].tokenId = _tokenId;
+  //   DAO storage dao = _idToDao[_marketplaceId];
+  //   for (uint i=0 ; i<dao.members.getMembers().length ; i++){
+  //     emit DaoJoined(dao.members.getMembers()[i],dao.tokenId);
+  //   }
+  // }
+
+  // function registerDeviceToCluster(address deviceAddress,uint _tokenId) public {
+  //   _idToDao[_tokenId].members.addMember(deviceAddress);
+  // }
+
+  function registerDeviceToDao(address deviceAddress,uint _marketplaceId) public {
+    _idToDao[_marketplaceId].members.addMember(deviceAddress);
+    emit DaoJoined(deviceAddress, _idToDao[_marketplaceId].marketPlaceId);
   }
 
-  function registerDeviceToCluster(address deviceAddress,uint _tokenId) public {
-    _idToDao[_tokenId].members.addMember(deviceAddress);
-  }
-
-  function registerDeviceToDao(address deviceAddress,uint _tokenId) public {
-    _idToDao[_tokenId].members.addMember(deviceAddress);
-    emit DaoJoined(deviceAddress, _idToDao[_tokenId].tokenId);
-  }
-
-  function getDaoMembers(uint256 _tokenId) public view returns (address[] memory) {
-    return _idToDao[_tokenId].members.getMembers();
+  function getDaoMembers(uint256 _marketplaceId) public view returns (address[] memory) {
+    return _idToDao[_marketplaceId].members.getMembers();
   }
 
   function getlistedDaos() public view returns (DAO[] memory){
@@ -266,9 +262,8 @@ contract OaseesMarketplace is ReentrancyGuard {
     for(uint i=0; i < daoCount;i++){
       if(_idToDao[i+1].members.isMember(msg.sender)){
         isMemberCount++;
-      }  
-
-    }  
+      }
+    }
 
     uint daoIndex = 0;
     DAO[] memory daos = new DAO[](daoCount-isMemberCount);

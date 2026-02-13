@@ -16,7 +16,7 @@ oasees-sdk init --expose-ip <host-ip>
 
 >**Note 1:** The new deployment relies on a "public", shared instance of the blockchain. Make sure the host you're installing the stack on is connected to the VPN.
 
->**Note 2:** Deployment now relies on publicly available container images and helm charts. Check out the [container-images](https://github.com/oasees/container-images) and [helm-charts](https://github.com/oasees/helm-charts) repositories for source code.
+>**Note 2:** Deployment now relies on publicly available container images and helm charts. You can find the helm charts [here](https://github.com/oasees/helm-charts).
 
 
 <br><br>
@@ -24,7 +24,7 @@ oasees-sdk init --expose-ip <host-ip>
 # Legacy
 
 ## Requirements
-This current version of the Oasees stack requires the following:
+The legacy version of the Oasees stack requires the following:
 - Docker version 24.0.5
 - Docker Compose version v2.3.3
 - Metamask browser extension

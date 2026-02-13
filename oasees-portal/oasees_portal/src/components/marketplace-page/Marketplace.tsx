@@ -49,6 +49,22 @@ const fetchModels = async () => {
 };
 
 
+const block_explorer_api = `http://${process.env.REACT_APP_BLOCKCHAIN_HOST}:8082/api/v2/`
+
+
+const get_abi = async (contract_address: string) => {
+
+    try {
+        const request = await axios.get(`${block_explorer_api}/smart-contracts/${contract_address}`);
+        const abi = request.data.abi;
+
+        return abi;
+    } catch (error) {
+        console.error('Error loading ABI: ', error);
+        return null;
+    }
+}
+
 const ipfs_get = async (ipfs_hash: string) => {
     const response = await axios.post(`http://${process.env.REACT_APP_EXPOSED_IP}:5001/api/v0/cat?arg=` + ipfs_hash);
     return response;
@@ -172,17 +188,30 @@ const Marketplace = ({ json }: MarketplaceProps) => {
 
                 console.log(available_daos);
 
-                for (const item of available_daos.slice(21)) {
+                for (const item of available_daos) {
                     const marketplace_id = item[0];
 
                     var members = await marketplaceMonitor.getDaoMembers(marketplace_id);
+
+                    let vcVerifier = '';
+
+                    try {
+                        const governance_abi = await get_abi(item.governance);
+                        const governance_contract = new ethers.Contract(item.governance, governance_abi, json.callProvider);
+
+                        vcVerifier = await governance_contract.vcVerifier();
+
+                    } catch (error) {
+
+                    }
 
                     daos.push({
                         title: item[5],
                         governance: item.governance,
                         id: marketplace_id,
                         desc: `**Decentralized Autonomous Organization** A community-led entity governed by transparent rules encoded as smart contracts on the blockchain. Members vote on proposals and manage shared resources collectively.`,
-                        members: members
+                        members: members,
+                        vcVerifier: vcVerifier,
                     })
 
                 }

@@ -67,13 +67,15 @@ interface Proposal {
 interface ProposalForm {
     title: string,
     description: string,
-    action: string
+    action: string,
+    recipient?: string
 }
 
 interface Vote {
     proposal: string,
     support: number,
     reason: string,
+    voter: string
 }
 
 interface DaoData {
@@ -92,7 +94,7 @@ const truncate_middle = (str: string) => {
 // const backend_port = 30022
 const backend_enpoint = `http://${process.env.REACT_APP_EXPOSED_IP}:30021`;
 
-const actions = ['0', '1', '2', '3'];
+const actions = ['0', '1', '2', '3', 'Payment'];
 
 const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, json }: DAOModalProps) => {
     // console.log(availableDevices)
@@ -111,6 +113,7 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
     const [loading, setLoading] = useState(false);
     const [opened, { close }] = useDisclosure(true);
     const [membersOpened, { open: openMembers, close: closeMembers }] = useDisclosure(false);
+    const [votesOpened, { open: openVotes, close: closeVotes }] = useDisclosure(false);
 
 
     const [avDevTemp, setAvDevTemp] = useState<any[]>([]);
@@ -120,6 +123,7 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
 
 
     const [ipfsData, setIpfsData] = useState<DaoData[]>([]);
+
 
 
     useEffect(() => {
@@ -183,6 +187,7 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
 
     useEffect(() => {
         const loadContracts = async () => {
+            console.log(currentDAO)
             try {
                 const signer = await json.provider.getSigner();
 
@@ -196,12 +201,12 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
                     currentDAO.token_abi,
                     await signer);
 
+
                 const dao_box_contract = new ethers.Contract(
                     currentDAO.box_address,
                     currentDAO.box_abi,
                     await signer);
 
-                console.log(await dao_box_contract.retrieve())
 
                 const token_balance = await dao_token_contract.balanceOf(json.account);
 
@@ -214,6 +219,11 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
                 setProposalFilter(proposal_filter);
                 setVoteFilter(vote_filter);
                 setUserBalance(token_balance);
+
+                console.log("Governance: ", currentDAO.governance_address);
+                console.log("Token: ", currentDAO.token_address);
+                console.log("Box: ", currentDAO.box_address);
+
             } catch (error) {
                 console.error("An error occured while initializing the contracts: ", error);
             }
@@ -345,13 +355,15 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
 
                 for (const result of results) {
                     const args = result.args;
+                    console.log(args)
                     if (args.weight > 0) {
                         const proposal = proposalDescriptions![args.proposalId];
                         const support = args.support;
                         const reason = args.reason;
+                        const voter = args.voter;
 
 
-                        votes.push({ proposal: proposal, support: support, reason: reason })
+                        votes.push({ proposal: proposal, support: support, reason: reason, voter: voter })
                     }
                 }
                 setVotes(votes);
@@ -440,8 +452,11 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
         setLoading(true);
         try {
             const transaction_count = await json.provider.getTransactionCount(json.account);
-            const function_signature = boxContract?.interface.encodeFunctionData('store', [Number(values.action)]);
-            const propose_transaction = await daoContract!.propose([boxContract?.address], [0], [function_signature], values.title, { nonce: transaction_count });
+
+            const function_signature = values.action !== 'Payment' ? boxContract?.interface.encodeFunctionData('store', [Number(values.action)]) : ["0x"];
+            const target = values.action !== 'Payment' ? boxContract?.address : values.recipient;
+
+            const propose_transaction = await daoContract!.propose([target], [0], [function_signature], values.title, { nonce: transaction_count });
             await propose_transaction.wait();
             const delegate_transaction = await tokenContract?.delegate(json.account, { nonce: transaction_count + 1 });
             await delegate_transaction.wait();
@@ -603,6 +618,15 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
     const mapped_votes = votes.slice(-15).reverse().map((vote, index) => (
         <Table.Tr key={index}>
             <Table.Td>{vote.proposal}</Table.Td>
+            <Table.Td>{vote.voter}</Table.Td>
+            <Table.Td>{supportToVote(vote.support)}</Table.Td>
+            <Table.Td>{vote.reason}</Table.Td>
+        </Table.Tr>
+    ));
+
+    const allMappedVotes = votes.slice().reverse().map((vote, index) => (
+        <Table.Tr key={index}>
+            <Table.Td>{vote.proposal}</Table.Td>
             <Table.Td>{supportToVote(vote.support)}</Table.Td>
             <Table.Td>{vote.reason}</Table.Td>
         </Table.Tr>
@@ -632,6 +656,22 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
                             </Table.Thead>
                             <Table.Tbody>
                                 {overviewMembers}
+                            </Table.Tbody>
+                        </Table>
+                    </ScrollArea>
+                </Modal>
+                <Modal opened={votesOpened} onClose={closeVotes} title="All Votes" centered size="80%">
+                    <ScrollArea h={600}>
+                        <Table striped={true} stripedColor="var(--mantine-color-gray-1)" withColumnBorders stickyHeader>
+                            <Table.Thead>
+                                <Table.Tr>
+                                    <Table.Th>Proposal</Table.Th>
+                                    <Table.Th>Vote</Table.Th>
+                                    <Table.Th>Reason</Table.Th>
+                                </Table.Tr>
+                            </Table.Thead>
+                            <Table.Tbody>
+                                {allMappedVotes}
                             </Table.Tbody>
                         </Table>
                     </ScrollArea>
@@ -708,13 +748,14 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
 
                             <Grid.Col span={12} className={styles.grid_col}>
 
-                                <Center pb={10} style={{ fontSize: 14 }}><u><b>Votes</b></u></Center>
+                                <Center pb={10} style={{ fontSize: 14, cursor: 'pointer' }} onClick={openVotes}><u><b>Votes</b></u></Center>
                                 <ScrollArea h={260}>
                                     <Table striped={true} stripedColor="var(--mantine-color-gray-1)" captionSide="top" withColumnBorders withTableBorder stickyHeader>
 
                                         <Table.Thead>
                                             <Table.Tr>
                                                 <Table.Th>Proposal</Table.Th>
+                                                <Table.Th>Voter</Table.Th>
                                                 <Table.Th>Vote</Table.Th>
                                                 <Table.Th>Reason</Table.Th>
                                             </Table.Tr>
@@ -762,6 +803,10 @@ const DAOModal = ({ currentDAO, availableDevices, closeModal, updateDevices, jso
                                         <Textarea minRows={3} maxRows={3} autosize label="Description" placeholder="Insert a description here." withAsterisk {...form.getInputProps('description')} pb={10} />
 
                                         <Select label="Action" placeholder="Pick an action." data={actions} withAsterisk allowDeselect={false} {...form.getInputProps('action')} pb={20} />
+
+                                        {form.getInputProps('action').value === 'Payment' && (
+                                            <TextInput label="Address" withAsterisk allowDeselect={false} {...form.getInputProps('address')} pb={20} />
+                                        )}
 
                                         <Center><Button type='submit' color='green' w={200}>Create</Button></Center>
                                     </form>

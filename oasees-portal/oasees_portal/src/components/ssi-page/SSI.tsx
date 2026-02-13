@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { ethers } from "ethers";
-import { TextInput, Button, Paper, Stack, Title, Text, Group, Center, Badge, ActionIcon, CopyButton, Tooltip } from "@mantine/core";
-import { IconCheck, IconX, IconCopy } from "@tabler/icons-react";
+import { TextInput, Button, Paper, Stack, Title, Text, Group, Center, Badge, ActionIcon, CopyButton, Tooltip, JsonInput, FileInput } from "@mantine/core";
+import { IconCheck, IconX, IconCopy, IconUpload } from "@tabler/icons-react";
 import "./SSI.css";
+import axios from "axios";
 
 const VC_VERIFIER_ADDRESS =
     process.env.REACT_APP_VC_VERIFIER_ADDRESS ||
-    "0x9E545E3C0baAB3E08CdfD552C960A1050f373042";
+    "0x22753E4264FDDc6181dc7cce468904A80a363E44";
 const DID_REGISTRY_ADDRESS =
     process.env.REACT_APP_DID_REGISTRY_ADDRESS ||
     "0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB";
+
+const block_explorer_api = `http://${process.env.REACT_APP_BLOCKCHAIN_HOST}:8082/api/v2/`
 
 interface DIDResult {
     owner: string;
@@ -28,15 +31,43 @@ interface SSIProps {
     json?: any;
 }
 
+const get_abi = async (contract_address: string) => {
+
+    try {
+        const request = await axios.get(`${block_explorer_api}/smart-contracts/${contract_address}`);
+        const abi = request.data.abi;
+
+        return abi;
+    } catch (error) {
+        console.error('Error loading ABI: ', error);
+        return null;
+    }
+}
+
 export default function SSI({ json }: SSIProps) {
     const [vcHash, setVcHash] = useState<string>("");
     const [status, setStatus] = useState<"verified" | "not-verified" | "">("");
-    const [didInput, setDidInput] = useState<string>("");
-    const [didResult, setDidResult] = useState<DIDResult | null>(null);
     const [issuerResult, setIssuerResult] = useState<IssuerDetails | null>(null);
     const [error, setError] = useState<string>("");
     const [checkingVC, setCheckingVC] = useState<boolean>(false);
+
+    // DID Resolution state
+    const [didInput, setDidInput] = useState<string>("");
+    const [didResult, setDidResult] = useState<DIDResult | null>(null);
     const [resolvingDID, setResolvingDID] = useState<boolean>(false);
+
+    // VC Creation state
+    const [vcJson, setVcJson] = useState<string>("");
+    const [signing, setSigning] = useState<boolean>(false);
+    const [signature, setSignature] = useState<string>("");
+    const [signedPayload, setSignedPayload] = useState<any>(null);
+    const [vcVerifier, setVcVerifier] = useState<string>("");
+
+    // VC Submission state
+    const [submissionJson, setSubmissionJson] = useState<string>("");
+    const [submissionSignature, setSubmissionSignature] = useState<string>("");
+    const [submitting, setSubmitting] = useState<boolean>(false);
+    const [submissionResult, setSubmissionResult] = useState<string>("");
 
     async function checkVC() {
         setError("");
@@ -113,7 +144,6 @@ export default function SSI({ json }: SSIProps) {
             setCheckingVC(false);
         }
     }
-
     async function resolveDID() {
         setError("");
         setDidResult(null);
@@ -144,6 +174,7 @@ export default function SSI({ json }: SSIProps) {
                 trimmedDid
             );
 
+
             setDidResult({
                 owner,
                 metadataURI,
@@ -160,6 +191,123 @@ export default function SSI({ json }: SSIProps) {
         }
     }
 
+    async function signVC() {
+        setError("");
+        setSignature("");
+
+        if (!vcJson.trim()) {
+            setError("Please enter EIP-712 compatible JSON to sign");
+            return;
+        }
+
+        setSigning(true);
+        try {
+            const signer = await json.provider.getSigner();
+            const address = await signer.getAddress();
+            const payload = JSON.parse(vcJson);
+
+            const domain = {
+                name: "PatientRegistry",
+                version: "1",
+                chainId: 31337,
+                verifyingContract: vcVerifier,
+            }
+
+            // Example 2: You could also auto-populate the issuer address
+            if (!payload.id) {
+                payload.id = "urn:uuid:" + ethers.utils.hexlify(ethers.utils.randomBytes(8));
+            }
+            if (!payload.issuanceDate) {
+                payload.issuanceDate = new Date().toISOString();
+            }
+
+            // Use eth_signTypedData_v4 via the provider
+            const types = {
+                // 1. The Nested Subject
+                PatientSubject: [
+                    { name: "PatientID", type: "string" },
+                    { name: "Age", type: "uint256" },
+                    { name: "Gender", type: "string" },
+                    { name: "Pathology", type: "string" }
+                ],
+                // 2. The Main Credential
+                VerifiableCredential: [
+                    { name: "id", type: "string" },
+                    { name: "issuer", type: "string" },
+                    { name: "holder", type: "address" },
+                    { name: "issuanceDate", type: "string" },
+                    { name: "credentialSubject", type: "PatientSubject" } // Nested Link
+                ]
+            };
+
+            const signature = await signer._signTypedData(domain, types, payload);
+
+            if (signature) {
+                setSignedPayload(payload);
+            }
+
+            setSignature(signature);
+        } catch (err: any) {
+            console.error(err);
+            setError(err?.shortMessage || err?.message || "Error signing VC");
+        } finally {
+            setSigning(false);
+        }
+    }
+
+    function downloadVC() {
+        if (!signedPayload) return;
+
+        const blob = new Blob([JSON.stringify(signedPayload, null, 2)], { type: "application/json" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "vc.json";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    async function verifyAndJoin() {
+        setError("");
+        setSubmissionResult("");
+
+        if (!submissionJson.trim() || !submissionSignature.trim()) {
+            setError("Please fill in both JSON and Signature fields");
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            const signer = await json.provider.getSigner();
+            const verifier = new ethers.Contract(
+                vcVerifier,
+                await get_abi(vcVerifier),
+                signer
+            );
+            console.log(verifier)
+
+            const payload = JSON.parse(submissionJson);
+
+            // Extract the 'message' part if adhering to the EIP-712 payload structure used in signVC
+            // Fallback to the root object if 'message' is missing (assuming root IS the VC)
+            const vcData = payload.message || payload;
+
+            console.log("vcData", vcData);
+
+            const transaction_count = await json.provider.getTransactionCount(signer.getAddress());
+
+            const tx = await verifier.verifyAndJoin(vcData, submissionSignature);
+            // await tx.wait();
+
+            setSubmissionResult("Successfully verified and joined!");
+        } catch (err: any) {
+            console.error(err);
+            setError(err?.shortMessage || err?.message || "Error submitting VC");
+        } finally {
+            setSubmitting(false);
+        }
+    }
+
     return (
         <Center pt={30} pb={50}>
             <Stack align="center" gap={40} w={800}>
@@ -168,7 +316,7 @@ export default function SSI({ json }: SSIProps) {
                 </Title>
 
                 {/* VC Verification Section */}
-                <Paper bg="var(--mantine-color-gray-1)" p="xl" shadow="xl" radius="lg" w="100%">
+                {/* <Paper bg="var(--mantine-color-gray-1)" p="xl" shadow="xl" radius="lg" w="100%">
                     <Stack gap="md">
                         <Group justify="space-between" align="center">
                             <Title order={3}>VC Verification</Title>
@@ -250,10 +398,10 @@ export default function SSI({ json }: SSIProps) {
                             </Stack>
                         )}
                     </Stack>
-                </Paper>
+                </Paper> */}
 
                 {/* DID Resolution Section */}
-                <Paper bg="var(--mantine-color-gray-1)" p="xl" shadow="xl" radius="lg" w="100%">
+                {/* <Paper bg="var(--mantine-color-gray-1)" p="xl" shadow="xl" radius="lg" w="100%">
                     <Stack gap="md">
                         <Group justify="space-between" align="center">
                             <Title order={3}>DID Resolution</Title>
@@ -315,15 +463,163 @@ export default function SSI({ json }: SSIProps) {
                             </Paper>
                         )}
                     </Stack>
+                </Paper> */}
+
+                {/* VC Creation Section */}
+                <Paper bg="var(--mantine-color-gray-1)" p="xl" shadow="xl" radius="lg" w="100%">
+                    <Stack gap="md">
+                        <Group justify="space-between" align="center">
+                            <Title order={3}>VC Creation</Title>
+                            <Badge color="grape" variant="light">Create Credential</Badge>
+                        </Group>
+
+                        <Text c="dimmed" size="sm">
+                            Enter the EIP-712 JSON content (types, domain, message) and sign it to create a proof.
+                        </Text>
+
+                        <TextInput
+                            label="VC Verifier Contract Address"
+                            placeholder="0x..."
+                            value={vcVerifier}
+                            onChange={(e) => setVcVerifier(e.target.value)}
+                            style={{ flex: 1 }}
+                            size="md"
+                        />
+
+                        <JsonInput
+                            label="EIP-712 Payload"
+                            placeholder='{ "types": {...}, "domain": {...}, "primaryType": "...", "message": {...} }'
+                            validationError="Invalid JSON"
+                            formatOnBlur
+                            autosize
+                            minRows={4}
+                            value={vcJson}
+                            onChange={setVcJson}
+                        />
+
+                        <Group justify="flex-end">
+                            {signature && (
+                                <Button
+                                    onClick={downloadVC}
+                                    variant="outline"
+                                    size="md"
+                                    color="grape"
+                                    leftSection={<IconCheck size={18} />}
+                                >
+                                    Download VC
+                                </Button>
+                            )}
+                            <Button
+                                onClick={signVC}
+                                loading={signing}
+                                size="md"
+                                color="grape"
+                            >
+                                Sign and Create
+                            </Button>
+                        </Group>
+
+                        {signature && (
+                            <Paper p="md" withBorder>
+                                <Stack gap="xs">
+                                    <Title order={5} c="dimmed" tt="uppercase" size="xs" fw={700}>Signature</Title>
+                                    <Group>
+                                        <Text style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{signature}</Text>
+                                        <CopyButton value={signature} timeout={2000}>
+                                            {({ copied, copy }) => (
+                                                <Tooltip label={copied ? 'Copied' : 'Copy'} withArrow position="right">
+                                                    <ActionIcon color={copied ? 'teal' : 'gray'} variant="subtle" onClick={copy} size="sm">
+                                                        {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                                                    </ActionIcon>
+                                                </Tooltip>
+                                            )}
+                                        </CopyButton>
+                                    </Group>
+                                </Stack>
+                            </Paper>
+                        )}
+                    </Stack>
                 </Paper>
 
-                {error && (
-                    <Paper p="md" bg="red.1" c="red.9">
-                        <Text fw={500}>Error: {error}</Text>
-                    </Paper>
-                )}
+                {/* VC Submission Section */}
+                <Paper bg="var(--mantine-color-gray-1)" p="xl" shadow="xl" radius="lg" w="100%">
+                    <Stack gap="md">
+                        <Group justify="space-between" align="center">
+                            <Title order={3}>VC Validity Check</Title>
+                            <Badge color="orange" variant="light">Verify & Join</Badge>
+                        </Group>
 
-            </Stack>
-        </Center>
+                        <Text c="dimmed" size="sm">
+                            Submit a signed Verifiable Credential to check its validity.
+                        </Text>
+
+
+                        <TextInput
+                            label="VC Verifier Contract Address"
+                            placeholder="0x..."
+                            value={vcVerifier}
+                            onChange={(e) => setVcVerifier(e.target.value)}
+                            style={{ flex: 1 }}
+                            size="md"
+                        />
+
+                        <FileInput
+                            label="Credential JSON File"
+                            placeholder="Upload your vc.json"
+                            accept="application/json"
+                            leftSection={<IconUpload size={14} />}
+                            onChange={(file: File | null) => {
+                                if (file) {
+                                    const reader = new FileReader();
+                                    reader.onload = (e) => {
+                                        const content = e.target?.result as string;
+                                        setSubmissionJson(content);
+                                    };
+                                    reader.readAsText(file);
+                                } else {
+                                    setSubmissionJson("");
+                                }
+                            }}
+                        />
+
+                        <TextInput
+                            label="Signature"
+                            placeholder="0x..."
+                            value={submissionSignature}
+                            onChange={(e) => setSubmissionSignature(e.target.value)}
+                        />
+
+                        <Group justify="flex-end">
+                            <Button
+                                onClick={verifyAndJoin}
+                                loading={submitting}
+                                size="md"
+                                color="orange"
+                            >
+                                Verify
+                            </Button>
+                        </Group>
+
+                        {submissionResult && (
+                            <Paper p="md" bg="teal.1" c="teal.9">
+                                <Group>
+                                    <IconCheck size={20} />
+                                    <Text fw={500}>{submissionResult}</Text>
+                                </Group>
+                            </Paper>
+                        )}
+                    </Stack>
+                </Paper>
+
+                {
+                    error && (
+                        <Paper p="md" bg="red.1" c="red.9">
+                            <Text fw={500}>Error: {error}</Text>
+                        </Paper>
+                    )
+                }
+
+            </Stack >
+        </Center >
     );
 }

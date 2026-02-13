@@ -1,4 +1,4 @@
-import {Grid, Paper, Stack, Loader } from "@mantine/core";
+import { Grid, Paper, Stack, Loader } from "@mantine/core";
 import DAOModal from "../dao-modal/DAOModal";
 import { useEffect, useRef, useState } from "react";
 import { ethers } from "ethers";
@@ -7,23 +7,24 @@ import { useCounter, useDisclosure } from "@mantine/hooks";
 import DAOCards from "../home-cards/DAOCards";
 import ItemCards from "../home-cards/ItemCards";
 import styles from "./Home.module.css"
-import ForceGraph2D, {ForceGraphMethods,NodeObject,LinkObject} from "react-force-graph-2d";
+import ForceGraph2D, { ForceGraphMethods, NodeObject, LinkObject } from "react-force-graph-2d";
 import AlgorithmPage from "../marketplace-page/AlgorithmPage";
 import { NftItem } from "src/types/interfaces";
+import { IconChevronsDownLeft } from "@tabler/icons-react";
 
 
 
-interface HomeProps{
-    json:any
+interface HomeProps {
+    json: any
 }
 
-interface DAO{
-    dao_name:string,
+interface DAO {
+    dao_name: string,
     members: string[],
     dao_id: number,
 }
 
-interface Device{
+interface Device {
     id: number,
     name: string,
     ip_address: string,
@@ -32,7 +33,7 @@ interface Device{
     isCluster: boolean,
 }
 
-interface Node{
+interface Node {
     ip_address: string,
     name: string,
     role: string,
@@ -45,91 +46,97 @@ const k8s_api = `http://${process.env.REACT_APP_EXPOSED_IP}:30021/k8s_api`;
 const block_explorer_api = `http://${process.env.REACT_APP_BLOCKCHAIN_HOST}:8082/api/v2/`
 
 
-const kubectlRequest = async (url:string,cmd: string) => {
+
+const kubectlRequest = async (url: string, cmd: string) => {
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ cmd })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      return await response.json();
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ cmd })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        return await response.json();
     } catch (error) {
-      console.error('Request failed:', error);
-      throw error;
+        console.error('Request failed:', error);
+        throw error;
     }
-  };
+};
 
 
 
-  const ipfs_get = async (ipfs_hash:string) => {
+const ipfs_get = async (ipfs_hash: string) => {
     const response = await axios.post(`http://${process.env.REACT_APP_EXPOSED_IP}:5001/api/v0/cat?arg=` + ipfs_hash);
-    return response; 
-  }
+    return response;
+}
 
-  const kube_get = async () => {
-    const nodesData = await kubectlRequest(k8s_api,'get nodes -o json');
-    
-    const parseNodesDataShort = (nodesData: { items: any[]; }) => 
+const kube_get = async () => {
+    const nodesData = await kubectlRequest(k8s_api, 'get nodes -o json');
+
+    const parseNodesDataShort = (nodesData: { items: any[]; }) =>
         nodesData?.items?.map(node => ({
             ip_address: node.status?.addresses?.find((addr: { type: string; }) => addr.type === 'InternalIP')?.address || 'Unknown',
             name: node.metadata?.name || 'Unknown',
-            role: (node.metadata?.labels?.['node-role.kubernetes.io/control-plane'] === 'true' || 
-                   node.metadata?.labels?.['node-role.kubernetes.io/master'] === 'true') ? 'control-plane' : 'worker',
+            role: (node.metadata?.labels?.['node-role.kubernetes.io/control-plane'] === 'true' ||
+                node.metadata?.labels?.['node-role.kubernetes.io/master'] === 'true') ? 'control-plane' : 'worker',
             status: node.status?.conditions?.find((c: { type: string; }) => c.type === 'Ready')?.status === 'True' ? 'Ready' : 'NotReady'
         })) || [];
-    
+
     const response = parseNodesDataShort(nodesData);
-    
-    return response; 
+
+    return response;
 }
 
-  const get_abi = async (contract_address:string) => {
-    
-    const request = await axios.get(`${block_explorer_api}/smart-contracts/${contract_address}`);
-    const abi = request.data.abi;
+const get_abi = async (contract_address: string) => {
 
-    return abi;
+    try {
+        const request = await axios.get(`${block_explorer_api}/smart-contracts/${contract_address}`);
+        const abi = request.data.abi;
+
+        return abi;
+    } catch (error) {
+        console.error('Error loading ABI: ', error);
+        return null;
+    }
 }
 
-const Home = ({json}:HomeProps) => {
-    const [activeModal,setActiveModal] = useState(0);
+const Home = ({ json }: HomeProps) => {
+    const [activeModal, setActiveModal] = useState(0);
 
-    const [myAlgorithms,setMyAlgorithms] = useState<NftItem[]>([]);
+    const [myAlgorithms, setMyAlgorithms] = useState<NftItem[]>([]);
     const [myDaos, setMyDaos] = useState<DAO[]>([]);
 
-    const [myDevices,setMyDevices] = useState<Device[]>([]);
+    const [myDevices, setMyDevices] = useState<Device[]>([]);
 
-    const [modalUpdate,{toggle}] = useDisclosure();
-    const [counter, {increment}] = useCounter(0);
+    const [modalUpdate, { toggle }] = useDisclosure();
+    const [counter, { increment }] = useCounter(0);
 
     const [currentAlgorithm, setCurrentAlgorithm] = useState(0);
     const [currentDAO, setCurrentDAO] = useState(0);
-    const [currentDevice,setCurrentDevice] = useState(0);
+    const [currentDevice, setCurrentDevice] = useState(0);
 
     const [activePage, setActivePage] = useState(0);
 
-    const [myNodes,setMyNodes] = useState<Node[]>([]);
+    const [myNodes, setMyNodes] = useState<Node[]>([]);
 
     const [loadingDaos, setLoadingDaos] = useState(true);
     const [loadingNodes, setLoadingNodes] = useState(true);
     const [loadingItems, setLoadingItems] = useState(true);
 
 
-    const marketplaceMonitor:ethers.Contract = json.marketplace.connect(json.callProvider);
+    const marketplaceMonitor: ethers.Contract = json.marketplace.connect(json.callProvider);
 
-    useEffect(()=>{
+    useEffect(() => {
         const populateItems = async () => {
             setLoadingItems(true);
-            try{
+            try {
                 const nft_items = [];
-                const available_nfts = await marketplaceMonitor.getMyNfts({from:json.account});
+                const available_nfts = await marketplaceMonitor.getMyNfts({ from: json.account });
 
                 for (const item of available_nfts) {
                     const id = item[1];
@@ -151,7 +158,7 @@ const Home = ({json}:HomeProps) => {
                 }
 
                 setMyAlgorithms(nft_items);
-            } catch(error){
+            } catch (error) {
                 console.error('Error loading contracts: ', error);
             } finally {
                 setLoadingItems(false);
@@ -159,33 +166,33 @@ const Home = ({json}:HomeProps) => {
         }
 
         populateItems();
-    },[counter])
+    }, [counter])
 
 
-    useEffect(()=>{
-        const populateDaos = async() => {
+    useEffect(() => {
+        const populateDaos = async () => {
             setLoadingDaos(true);
-            try{
+            try {
                 const daos = [];
-                const available_daos = await marketplaceMonitor.getJoinedDaos({from: json.account});
+                const available_daos = await marketplaceMonitor.getJoinedDaos({ from: json.account });
 
                 // console.log(available_daos);
 
- 
 
-                for (const dao of available_daos){
+
+                for (const dao of available_daos) {
                     const tokenId = dao[0];
 
                     let m = [];
                     const members = await marketplaceMonitor.getDaoMembers(dao[0])
-                    for (const member of members){
+                    for (const member of members) {
                         m.push(member);
                     }
 
                     const governance_address = dao[1]
                     const governance_abi = await get_abi(dao[1])
                     const token_address = dao[3]
-                    const token_abi  = await get_abi(dao[3])
+                    const token_abi = await get_abi(dao[3])
                     const box_address = dao[4]
                     const box_abi = await get_abi(dao[4])
                     const meta = dao[5]
@@ -198,13 +205,13 @@ const Home = ({json}:HomeProps) => {
                         "box_address": box_address,
                         "box_abi": box_abi,
                         "dao_name": meta,
-                        
+
                     }
 
-                    daos.push({...content,"dao_name": meta, "dao_id": dao[0],"members":m})
+                    daos.push({ ...content, "dao_name": meta, "dao_id": dao[0], "members": m })
                 }
                 setMyDaos(daos);
-            } catch(error){
+            } catch (error) {
                 console.error('Error loading contracts: ', error);
             } finally {
                 setLoadingDaos(false);
@@ -217,12 +224,12 @@ const Home = ({json}:HomeProps) => {
         //         const available_devices = await marketplaceMonitor.getMyDevices({from: json.account});
 
         //         var i=1
-                
+
         //         for (const device of available_devices) {
         //             const price = ethers.utils.formatEther(device[4]);
         //             const meta_hash = device[5];
         //             const content_hash = await json.nft.tokenURI(device[1])
-                    
+
         //             const content = (await ipfs_get(content_hash)).data;
 
         //             const metadata = (await ipfs_get(meta_hash)).data;
@@ -256,20 +263,20 @@ const Home = ({json}:HomeProps) => {
         // }
 
         populateDaos();
-    },[modalUpdate,counter])
+    }, [modalUpdate, counter])
 
-    useEffect(()=>{
+    useEffect(() => {
         const populateNodes = async () => {
             setLoadingNodes(true);
-            var nodes:Node[] = [];
-            try{
+            var nodes: Node[] = [];
+            try {
                 const result = await kube_get();
 
                 const data = result;
 
                 console.log(data)
                 // console.log(data[0]);
-                for (const node of data){
+                for (const node of data) {
                     var joined_daos: never[] = [];
                     var account = '';
                     // try{
@@ -300,7 +307,7 @@ const Home = ({json}:HomeProps) => {
 
                 setMyNodes(nodes);
                 // console.log(nodes);
-            } catch(error){
+            } catch (error) {
                 console.error('Error loading contracts: ', error);
             } finally {
                 setLoadingNodes(false);
@@ -308,7 +315,7 @@ const Home = ({json}:HomeProps) => {
         }
 
         populateNodes();
-    },[modalUpdate,counter])
+    }, [modalUpdate, counter])
 
     // useEffect(()=>{
     //     const populateNodes = async () => {
@@ -339,40 +346,40 @@ const Home = ({json}:HomeProps) => {
     // },[])
 
 
-    useEffect(()=> {
-        const algFilter = marketplaceMonitor.filters.NFTSold(null,null,null,json.account);
+    useEffect(() => {
+        const algFilter = marketplaceMonitor.filters.NFTSold(null, null, null, json.account);
         const daoFilter = marketplaceMonitor.filters.DaoJoined(json.account);
         const clusterFilter = marketplaceMonitor.filters.ClusterJoined(json.account);
         const devFilter = marketplaceMonitor.filters.DeviceSold(json.account);
-        marketplaceMonitor.on(algFilter,increment);
-        marketplaceMonitor.on(daoFilter,increment);
-        marketplaceMonitor.on(clusterFilter,increment);
-        marketplaceMonitor.on(devFilter,increment);
+        marketplaceMonitor.on(algFilter, increment);
+        marketplaceMonitor.on(daoFilter, increment);
+        marketplaceMonitor.on(clusterFilter, increment);
+        marketplaceMonitor.on(devFilter, increment);
 
-        return () => {marketplaceMonitor.off(algFilter,increment); marketplaceMonitor.off(daoFilter,increment); marketplaceMonitor.off(clusterFilter,increment); marketplaceMonitor.off(devFilter,increment);};
-    },[])
+        return () => { marketplaceMonitor.off(algFilter, increment); marketplaceMonitor.off(daoFilter, increment); marketplaceMonitor.off(clusterFilter, increment); marketplaceMonitor.off(devFilter, increment); };
+    }, [])
 
 
-    const closeModal = () =>{
+    const closeModal = () => {
         setActiveModal(0)
     };
 
 
     const availableDevices = () => {
-        let avNodes:Node[] = [];
+        let avNodes: Node[] = [];
         const selectedDao = myDaos[activeModal - 1]
-        for (var node of myNodes){
-            if(node.status)
+        for (var node of myNodes) {
+            if (node.status)
                 avNodes.push(node);
         }
 
         return avNodes;
     };
-    
+
     // const modalDevices = () => {
     //     let mNodes: Node[] = [];
     //     const selectedDao = myDaos[activeModal-1]
-        
+
     //     for (var node of myNodes){
     //         if(node.status  && node.role!='control-plane' && node.daos.includes(selectedDao))
     //             mNodes.push(node);
@@ -381,10 +388,10 @@ const Home = ({json}:HomeProps) => {
     // };
 
 
-    
+
     const Graph = () => {
         const w = 907;
-        const fgRef = useRef<ForceGraphMethods<NodeObject<{}>,LinkObject<{}>>>();
+        const fgRef = useRef<ForceGraphMethods<NodeObject<{}>, LinkObject<{}>>>();
 
         const calcGraphData = () => {
             let daoX = 0;
@@ -393,23 +400,23 @@ const Home = ({json}:HomeProps) => {
             let i = 1;
             let j = 1;
 
-            let nodes:any= [];
-            let links:any = [];
-            for (const node of myNodes){
-                if(node.status){
-                    if(node.role=='control-plane'){
+            let nodes: any = [];
+            let links: any = [];
+            for (const node of myNodes) {
+                if (node.status) {
+                    if (node.role == 'control-plane') {
                         nodes.push({
                             id: "master",
                             name: node.name,
                             label: node.ip_address,
                             x: daoX,
                             y: daoY,
-                            val:6,
+                            val: 6,
                         });
 
-                        daoX+=15;
-                        daoY+=5;
-                        i+=1;
+                        daoX += 15;
+                        daoY += 5;
+                        i += 1;
                     } else {
                         nodes.push({
                             id: "device" + j,
@@ -420,13 +427,13 @@ const Home = ({json}:HomeProps) => {
                             val: 2,
                         })
                         links.push({
-                            source: "device" +j,
+                            source: "device" + j,
                             target: "master",
                         })
 
-                        j+=1;
+                        j += 1;
 
-                        deviceX+= links.length==0 ? 50 : 50/links.length;
+                        deviceX += links.length == 0 ? 50 : 50 / links.length;
                     }
                 }
                 // if(dao.hasCluster){
@@ -439,25 +446,25 @@ const Home = ({json}:HomeProps) => {
                 //         val:6,
                 //     })
 
-                        // for (let j=1; j<dao.members.length; j++) {
-                        //     nodes.push({
-                        //         id: "worker" + j,
-                        //         name: "Worker",
-                        //         label: "device",
-                        //         x: deviceX,
-                        //         y: 0,
-                        //         val: 2,
-                        //     })
+                // for (let j=1; j<dao.members.length; j++) {
+                //     nodes.push({
+                //         id: "worker" + j,
+                //         name: "Worker",
+                //         label: "device",
+                //         x: deviceX,
+                //         y: 0,
+                //         val: 2,
+                //     })
 
-                        //     links.push({
-                        //         source: "worker"+j,
-                        //         target: "master"+i,
-                        //     })
+                //     links.push({
+                //         source: "worker"+j,
+                //         target: "master"+i,
+                //     })
 
-                        //     deviceX+= links.length==0 ? 50 : 50/links.length;
-                        // }
+                //     deviceX+= links.length==0 ? 50 : 50/links.length;
+                // }
 
-                    
+
             }
 
 
@@ -509,50 +516,52 @@ const Home = ({json}:HomeProps) => {
             //     i+=1;
             // }
 
-            
-            return {"nodes": nodes, "links": links}
+
+            return { "nodes": nodes, "links": links }
         }
 
-        return <ForceGraph2D ref={fgRef} cooldownTicks={50} onEngineStop={()=> {if(myNodes.length>0){
-            fgRef.current?.zoomToFit(1000,40);
-        }}}
-        height={273} width={w} graphData={calcGraphData()}
-        nodeCanvasObject={(node, ctx)=>{
-            const label = node.id as string;
-            const img = new Image();
-            if(label.includes("master")){
-                img.src = "./images/master.png";
-                ctx.drawImage(img, node.x!-16/2, node.y!-16/2,16,16);
-                ctx.textAlign= 'center';
-                ctx.textBaseline= 'top';
-                ctx.font = '6px Sans-Serif';
-                ctx.fillStyle="black"
-                ctx.fillText(node.name!,node.x!,node.y!+8);
-            }else{
-                if(label.includes("device")){
-                    img.src = "./images/worker.png";
-                }else{
-                    img.src = "./images/worker2.png"
-                }
-                ctx.drawImage(img, node.x!-8, node.y!-8,16,16);
-
-                ctx.textAlign= 'center';
-                ctx.textBaseline= 'bottom';
-                ctx.font = '6px Sans-Serif';
-                ctx.fillStyle="black";
-                ctx.fillText(node.name!,node.x!,node.y!-7);
-                ctx.fillStyle="red";
+        return <ForceGraph2D ref={fgRef} cooldownTicks={50} onEngineStop={() => {
+            if (myNodes.length > 0) {
+                fgRef.current?.zoomToFit(1000, 40);
             }
         }}
-        nodeCanvasObjectMode={()=>'after'}
-        nodeColor={node=>(node.id as string).includes('master') ? 'white' : 'white'}
-        nodeLabel={node=>(node.label as string)}
-        linkWidth={link=>3}
-        d3AlphaDecay={0.07}
+            height={273} width={w} graphData={calcGraphData()}
+            nodeCanvasObject={(node, ctx) => {
+                const label = node.id as string;
+                const img = new Image();
+                if (label.includes("master")) {
+                    img.src = "./images/master.png";
+                    ctx.drawImage(img, node.x! - 16 / 2, node.y! - 16 / 2, 16, 16);
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.font = '6px Sans-Serif';
+                    ctx.fillStyle = "black"
+                    ctx.fillText(node.name!, node.x!, node.y! + 8);
+                } else {
+                    if (label.includes("device")) {
+                        img.src = "./images/worker.png";
+                    } else {
+                        img.src = "./images/worker2.png"
+                    }
+                    ctx.drawImage(img, node.x! - 8, node.y! - 8, 16, 16);
+
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.font = '6px Sans-Serif';
+                    ctx.fillStyle = "black";
+                    ctx.fillText(node.name!, node.x!, node.y! - 7);
+                    ctx.fillStyle = "red";
+                }
+            }}
+            nodeCanvasObjectMode={() => 'after'}
+            nodeColor={node => (node.id as string).includes('master') ? 'white' : 'white'}
+            nodeLabel={node => (node.label as string)}
+            linkWidth={link => 3}
+            d3AlphaDecay={0.07}
         // d3VelocityDecay={0.5}
-        
-        
-              />
+
+
+        />
     }
 
     const getEth = async () => {
@@ -561,102 +570,102 @@ const Home = ({json}:HomeProps) => {
         await signer.sendTransaction({
             to: "0x516fed8BA832036eC95D5086e340f9ee2685e65F",
             value: ethers.utils.parseEther("10.0"), // Sends exactly 1.0 ether
-            nonce:transaction_count
-          });
+            nonce: transaction_count
+        });
     }
 
-    const openAlgorithmPage = (index:number) => {
+    const openAlgorithmPage = (index: number) => {
         setCurrentAlgorithm(index);
         changePage(1);
     }
 
-    const openDAOPage = (index:number) => {
+    const openDAOPage = (index: number) => {
         setCurrentDAO(index);
         changePage(2);
     }
 
-    const openDevicePage = (index:number) => {
+    const openDevicePage = (index: number) => {
         setCurrentDevice(index);
         changePage(3);
     }
 
-    const changePage = (n:number) => {
+    const changePage = (n: number) => {
         setActivePage(n);
     }
 
-    return(
+    return (
         <>
-        {activeModal>0 && <DAOModal
-        currentDAO={myDaos[activeModal-1]}
-        availableDevices={availableDevices()}
-        closeModal={closeModal}
-        updateDevices = {toggle}
-        json={json}/>}
+            {activeModal > 0 && <DAOModal
+                currentDAO={myDaos[activeModal - 1]}
+                availableDevices={availableDevices()}
+                closeModal={closeModal}
+                updateDevices={toggle}
+                json={json} />}
 
-        {activePage==1 ?
-            <AlgorithmPage json={json} changePage={changePage} currentAlgorithm={myAlgorithms[currentAlgorithm]} isPurchased={true}/>
-            :
+            {activePage == 1 ?
+                <AlgorithmPage json={json} changePage={changePage} currentAlgorithm={myAlgorithms[currentAlgorithm]} isPurchased={true} />
+                :
 
-            <Grid  justify='space-evenly'>
-            <Grid.Col span={12} fw={600}>My OASEES</Grid.Col>
+                <Grid justify='space-evenly'>
+                    <Grid.Col span={12} fw={600}>My OASEES</Grid.Col>
 
-        
 
-            <Grid.Col className={styles.grid_col} span={12} >
-            <Paper shadow='xl' py={30} radius={20}>
-                <Stack justify="center" align="center">
-                Joined DAOs
-                    {/* <ScrollArea h={208}>
+
+                    <Grid.Col className={styles.grid_col} span={12} >
+                        <Paper shadow='xl' py={30} radius={20}>
+                            <Stack justify="center" align="center">
+                                Joined DAOs
+                                {/* <ScrollArea h={208}>
                     <DAOTable elements={myDaos} setActiveModal={setActiveModal}/>
                     </ScrollArea> */}
-                    {loadingDaos ? <Loader size="md" /> : <DAOCards elements={myDaos} setActiveModal={setActiveModal}/>}
-                </Stack>
-            </Paper>
-            </Grid.Col>
+                                {loadingDaos ? <Loader size="md" /> : <DAOCards elements={myDaos} setActiveModal={setActiveModal} />}
+                            </Stack>
+                        </Paper>
+                    </Grid.Col>
 
-            <Grid.Col className={styles.grid_col} span={{base:12, lg:6}}>
-                <Paper shadow='xl' radius={20}>
-                <Stack justify="center" align="center" pt={30} gap={0}>
-                Devices
-                {/* <Stack justify="center" align="center">
+                    <Grid.Col className={styles.grid_col} span={{ base: 12, lg: 6 }}>
+                        <Paper shadow='xl' radius={20}>
+                            <Stack justify="center" align="center" pt={30} gap={0}>
+                                Devices
+                                {/* <Stack justify="center" align="center">
                 {/* <Paper shadow='xl' radius='xs' withBorder>
                     <ScrollArea h={207}>
                         <DeviceTable elements={myDevices}/>
                     </ScrollArea>
                 </Paper> */}
 
-                    {/* <DeviceCards elements={myDevices}/>
+                                {/* <DeviceCards elements={myDevices}/>
                 </Stack> */}
-                    {loadingNodes ? <Loader size="md" /> : (
-                        <div className={styles.graph} id="graph">
-                            <Graph/>
-                        </div>
-                    )}
-                </Stack>
-                </Paper>
-            </Grid.Col>
+                                {loadingNodes ? <Loader size="md" /> : (
+                                    <div className={styles.graph} id="graph">
+                                        <Graph />
+                                    </div>
+                                )}
+                            </Stack>
+                        </Paper>
+                    </Grid.Col>
 
-            <Grid.Col className={styles.grid_col} span={{base:12, lg:6}} >
-            <Paper shadow='xl' py={30} radius={20}>
-                <Stack justify="center" align="center">
-                Purchased Items
-                {/* <Paper shadow='xl' radius='xs' withBorder>
+                    <Grid.Col className={styles.grid_col} span={{ base: 12, lg: 6 }} >
+                        <Paper shadow='xl' py={30} radius={20}>
+                            <Stack justify="center" align="center">
+                                Purchased Items
+                                {/* <Paper shadow='xl' radius='xs' withBorder>
                     <ScrollArea h={207}>
                     <ItemTable elements={myAlgorithms}/>
                     </ScrollArea>
                 </Paper> */}
-                    {loadingItems ? <Loader size="md" /> : <ItemCards algorithms={myAlgorithms} openAlgorithmPage={openAlgorithmPage}/>}
+                                {loadingItems ? <Loader size="md" /> : <ItemCards algorithms={myAlgorithms} openAlgorithmPage={openAlgorithmPage} />}
 
-                </Stack>
-                </Paper>
-            </Grid.Col>
+                            </Stack>
+                        </Paper>
+                    </Grid.Col>
 
-            </Grid>
+                </Grid>
 
-            // <Button onClick={getEth} color="blue">ETH</Button>
+                // <Button onClick={getEth} color="blue">ETH</Button>
             }
         </>
-        
+
     );
 }
 

@@ -59,11 +59,11 @@ while status_code != (201 or 200):
 print(f"Account retrieved: {account,private_key}")
 
 
-BLOCKCHAIN_URL = "http://10.160.3.172:8545"
-BLOCKSCOUT_API_URL = "http://10.160.3.172:8082/api/v2"
+# BLOCKCHAIN_URL = "http://10.160.3.172:8545"
+# BLOCKSCOUT_API_URL = "http://10.160.3.172:8082/api/v2"
 
-# BLOCKCHAIN_URL = os.environ['BLOCKCHAIN_URL']
-# BLOCKSCOUT_API_URL = os.environ['BLOCKSCOUT_API']
+BLOCKCHAIN_URL = os.getenv('BLOCKCHAIN_URL', 'http://10.160.3.172:8545')
+BLOCKSCOUT_API_URL = os.getenv('BLOCKSCOUT_API', 'http://10.160.3.172:8082/api/v2')
 
 w3, marketplace_contract, nft_contract = load_contracts(BLOCKCHAIN_URL,BLOCKSCOUT_API_URL)
 

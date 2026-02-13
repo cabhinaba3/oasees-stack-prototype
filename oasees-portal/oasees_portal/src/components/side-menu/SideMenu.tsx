@@ -15,7 +15,7 @@ const menu_items = [
     ['Publish', './images/publish.png'],
     ['Notebook', './images/notebook.png'],
     ['Solidity IDE', './images/solidity.png'],
-    ['SSI', './images/chain.png']
+    // ['SSI', './images/chain.png']
 ];
 
 
